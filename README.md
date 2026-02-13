@@ -2,6 +2,17 @@
 
 An offline-first, encrypted markdown notebook for Windows. Your notes never leave your device.
 
+## Download
+
+Pre-built Windows installers (no dependencies required):
+
+| Installer | Format |
+|-----------|--------|
+| [MDNotebook_0.1.0_x64-setup.exe](installers/MDNotebook_0.1.0_x64-setup.exe) | NSIS (recommended) |
+| [MDNotebook_0.1.0_x64_en-US.msi](installers/MDNotebook_0.1.0_x64_en-US.msi) | MSI |
+
+> Windows may show a SmartScreen warning since the app is not code-signed. Click "More info" then "Run anyway" to proceed.
+
 ## Features
 
 - **AES-256-GCM Encryption** — Vault is encrypted with your passphrase using PBKDF2 key derivation. No server, no cloud, no telemetry.
