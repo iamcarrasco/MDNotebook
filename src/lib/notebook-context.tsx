@@ -643,33 +643,26 @@ export function NotebookProvider({
 
   // Track unsaved changes for beforeunload warning
   const dirtyRef = useRef(false)
-  const stateRef = useRef(state)
-  stateRef.current = state
-
-  // Shared save function (used by debounce + flush)
-  const saveNow = useRef(async () => {
-    if (!hydratedRef.current) return
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    dispatch({ type: 'SET_SAVE_STATUS', status: 'saving' })
-    try {
-      const fields = getVaultFields(stateRef.current)
-      const json = JSON.stringify(fields, null, 2)
-      const encrypted = await encryptVault(json, passphraseRef.current)
-      await writeVaultFile(folderRef.current, encrypted)
-      dirtyRef.current = false
-      dispatch({ type: 'SET_SAVE_STATUS', status: 'saved' })
-    } catch {
-      dispatch({ type: 'SET_SAVE_STATUS', status: 'error' })
-      notify('Save Failed', 'MDNotebook could not save your vault. Please check disk space and permissions.')
-    }
-  })
 
   // Persist with debounce — encrypt and write to vault file
   useEffect(() => {
     if (!hydratedRef.current || state.vaultLoading) return
     dirtyRef.current = true
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    saveTimeoutRef.current = setTimeout(() => saveNow.current(), 500)
+    saveTimeoutRef.current = setTimeout(async () => {
+      dispatch({ type: 'SET_SAVE_STATUS', status: 'saving' })
+      try {
+        const fields = getVaultFields(state)
+        const json = JSON.stringify(fields, null, 2)
+        const encrypted = await encryptVault(json, passphraseRef.current)
+        await writeVaultFile(folderRef.current, encrypted)
+        dirtyRef.current = false
+        dispatch({ type: 'SET_SAVE_STATUS', status: 'saved' })
+      } catch {
+        dispatch({ type: 'SET_SAVE_STATUS', status: 'error' })
+        notify('Save Failed', 'MDNotebook could not save your vault. Please check disk space and permissions.')
+      }
+    }, 500)
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     }
@@ -680,11 +673,19 @@ export function NotebookProvider({
     let unlisten: (() => void) | null = null
     import('@tauri-apps/api/event').then(({ listen }) => {
       listen('flush-save', () => {
-        if (dirtyRef.current) saveNow.current()
+        if (dirtyRef.current && hydratedRef.current && !state.vaultLoading) {
+          if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
+          const fields = getVaultFields(state)
+          const json = JSON.stringify(fields, null, 2)
+          encryptVault(json, passphraseRef.current)
+            .then(encrypted => writeVaultFile(folderRef.current, encrypted))
+            .then(() => { dirtyRef.current = false })
+            .catch(() => {})
+        }
       }).then(fn => { unlisten = fn })
     }).catch(() => {})
     return () => { unlisten?.() }
-  }, [])
+  }, [state])
 
   // Warn before closing if there are unsaved changes
   useEffect(() => {
