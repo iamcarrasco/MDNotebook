@@ -666,7 +666,7 @@ export function NotebookProvider({
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     }
-  }, [state.tree, state.trash, state.activeId, state.theme, state.sidebarWidth, state.sortBy, state.sortDirection, state.openTabs, state.vaultLoading])
+  }, [state.tree, state.trash, state.theme, state.sidebarWidth, state.sortBy, state.sortDirection, state.vaultLoading])
 
   // Flush pending saves on quit (Tauri emits flush-save before exit)
   useEffect(() => {
