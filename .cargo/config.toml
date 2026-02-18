@@ -1,0 +1,2 @@
+[build]
+# cargo-xwin handles Windows SDK setup automatically

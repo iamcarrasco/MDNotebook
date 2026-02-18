@@ -1,0 +1,44 @@
+{
+  "name": "mdnotebook",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Offline-first encrypted markdown notebook desktop app.",
+  "author": "MDNotebook",
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev": "next dev --port 1420",
+    "build": "next build",
+    "lint": "eslint",
+    "types:check": "tsc --noEmit",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@mdxeditor/editor": "^3.52.3",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-global-shortcut": "^2.0.0",
+    "@tauri-apps/plugin-notification": "^2.0.0",
+    "framer-motion": "^12.34.0",
+    "mermaid": "^11.12.2",
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
+    "@types/node": "^25.2.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "^16.1.6",
+    "typescript": "^5.9.3",
+    "vitest": "^2.0.0"
+  }
+}

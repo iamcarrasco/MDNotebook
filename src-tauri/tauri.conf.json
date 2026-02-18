@@ -1,0 +1,37 @@
+{
+  "productName": "MDNotebook",
+  "version": "0.1.0",
+  "identifier": "com.mdnotebook.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../out"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "MDNotebook",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "decorations": true,
+        "transparent": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown"],
+        "mimeType": "text/markdown",
+        "description": "Markdown Document",
+        "role": "Editor"
+      }
+    ]
+  }
+}
