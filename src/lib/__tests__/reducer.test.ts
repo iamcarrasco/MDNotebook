@@ -38,6 +38,7 @@ function makeState(overrides: Partial<NotebookState> = {}): NotebookState {
     customTemplates: [],
     noteVersions: {},
     treeContentVersion: 0,
+    assets: {},
     ...overrides,
   }
 }

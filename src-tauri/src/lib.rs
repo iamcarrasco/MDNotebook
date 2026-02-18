@@ -97,6 +97,103 @@ fn read_markdown_file(path: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to read file: {}", e))
 }
 
+// ── Vault asset commands ──
+
+fn validate_asset_id(asset_id: &str) -> Result<(), String> {
+    if asset_id.is_empty() || asset_id.len() > 64 {
+        return Err("Invalid asset ID length".into());
+    }
+    if !asset_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("Invalid asset ID characters".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn write_vault_asset(folder: String, asset_id: String, data: String) -> Result<(), String> {
+    validate_asset_id(&asset_id)?;
+    let assets_dir = PathBuf::from(&folder).join("vault-assets");
+    fs::create_dir_all(&assets_dir)
+        .map_err(|e| format!("Failed to create vault-assets directory: {}", e))?;
+
+    let path = assets_dir.join(format!("{}.enc", asset_id));
+    let tmp_path = assets_dir.join(format!("{}.enc.tmp", asset_id));
+
+    fs::write(&tmp_path, &data)
+        .map_err(|e| format!("Failed to write asset temp file: {}", e))?;
+    if let Err(e) = fs::rename(&tmp_path, &path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Failed to rename asset temp file: {}", e));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn read_vault_asset(folder: String, asset_id: String) -> Result<String, String> {
+    validate_asset_id(&asset_id)?;
+    let path = PathBuf::from(&folder).join("vault-assets").join(format!("{}.enc", asset_id));
+    fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read asset {}: {}", asset_id, e))
+}
+
+#[tauri::command]
+fn delete_vault_asset(folder: String, asset_id: String) -> Result<(), String> {
+    validate_asset_id(&asset_id)?;
+    let path = PathBuf::from(&folder).join("vault-assets").join(format!("{}.enc", asset_id));
+    if path.exists() {
+        fs::remove_file(&path)
+            .map_err(|e| format!("Failed to delete asset {}: {}", asset_id, e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn list_vault_assets(folder: String) -> Result<Vec<String>, String> {
+    let assets_dir = PathBuf::from(&folder).join("vault-assets");
+    if !assets_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut ids = Vec::new();
+    let entries = fs::read_dir(&assets_dir)
+        .map_err(|e| format!("Failed to read vault-assets: {}", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("enc") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                ids.push(stem.to_string());
+            }
+        }
+    }
+    Ok(ids)
+}
+
+#[tauri::command]
+fn save_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    content: String,
+    filter_name: String,
+    filter_extensions: Vec<String>,
+) -> Result<bool, String> {
+    let ext_refs: Vec<&str> = filter_extensions.iter().map(|s| s.as_str()).collect();
+    let path = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter(&filter_name, &ext_refs)
+        .blocking_save_file();
+
+    match path {
+        Some(file_path) => {
+            fs::write(file_path.as_path().unwrap(), &content)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+            Ok(true)
+        }
+        None => Ok(false), // User cancelled
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct ExportNote {
     name: String,
@@ -294,7 +391,12 @@ pub fn run() {
             write_vault_file,
             vault_file_exists,
             export_notes_to_folder,
-            read_markdown_file
+            save_file,
+            read_markdown_file,
+            write_vault_asset,
+            read_vault_asset,
+            delete_vault_asset,
+            list_vault_assets
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

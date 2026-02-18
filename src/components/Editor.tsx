@@ -31,6 +31,8 @@ import {
   Separator,
 } from '@mdxeditor/editor'
 import '@mdxeditor/editor/style.css'
+import { useVaultCredentials, useNotebook, useNotebookDispatch } from '@/lib/notebook-context'
+import { saveAsset, loadAssetAsObjectUrl } from '@/lib/asset-manager'
 
 interface EditorProps {
   markdown: string
@@ -83,6 +85,17 @@ export default function Editor({ markdown: value, onChange, theme = 'light' }: E
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const prevValueRef = useRef(value)
+
+  // Vault asset refs (stable references for plugin callbacks)
+  const { vaultFolder, passphrase } = useVaultCredentials()
+  const { assets } = useNotebook()
+  const dispatch = useNotebookDispatch()
+  const vaultFolderRef = useRef(vaultFolder)
+  vaultFolderRef.current = vaultFolder
+  const passphraseRef = useRef(passphrase)
+  passphraseRef.current = passphrase
+  const assetsRef = useRef(assets)
+  assetsRef.current = assets
 
   // Defer mount to avoid flushSync during React render cycle
   const [mounted, setMounted] = useState(false)
@@ -167,11 +180,19 @@ export default function Editor({ markdown: value, onChange, theme = 'light' }: E
     }),
     imagePlugin({
       imageUploadHandler: async (file: File) => {
-        return new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.readAsDataURL(file)
-        })
+        const meta = await saveAsset(vaultFolderRef.current, passphraseRef.current, file)
+        dispatch({ type: 'ADD_ASSET', meta })
+        return `vault://${meta.id}`
+      },
+      imagePreviewHandler: async (src: string) => {
+        if (src.startsWith('vault://')) {
+          const assetId = src.replace('vault://', '')
+          const meta = assetsRef.current[assetId]
+          if (meta) {
+            return loadAssetAsObjectUrl(vaultFolderRef.current, passphraseRef.current, assetId, meta.mimeType)
+          }
+        }
+        return src
       },
     }),
     diffSourcePlugin({ viewMode: 'rich-text' }),

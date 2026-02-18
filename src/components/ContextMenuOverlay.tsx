@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback } from 'react'
-import { useNotebook, useNotebookDispatch } from '@/lib/notebook-context'
+import { useNotebook, useNotebookDispatch, useVaultCredentials } from '@/lib/notebook-context'
 import { findNote, findItem, findItemName, findParentPath } from '@/lib/tree-utils'
 import { exportNoteAsMarkdown } from '@/lib/export-import'
 import { ExportIcon, PinIcon } from '@/components/Icons'
@@ -11,14 +11,15 @@ interface Props {
 }
 
 export default function ContextMenuOverlay({ onDelete }: Props) {
-  const { tree, contextMenu } = useNotebook()
+  const { tree, contextMenu, assets } = useNotebook()
   const dispatch = useNotebookDispatch()
+  const { vaultFolder, passphrase } = useVaultCredentials()
 
   const handleExportMd = useCallback((itemId: string) => {
     const note = findNote(tree, itemId)
-    if (note) exportNoteAsMarkdown(note)
+    if (note) exportNoteAsMarkdown(note, assets, vaultFolder, passphrase)
     dispatch({ type: 'SET_CONTEXT_MENU', menu: null })
-  }, [tree, dispatch])
+  }, [tree, dispatch, assets, vaultFolder, passphrase])
 
   if (!contextMenu) return null
 
