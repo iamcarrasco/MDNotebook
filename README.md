@@ -38,8 +38,8 @@ Pre-built Windows installers — no dependencies required:
 
 | Installer | Format |
 |-----------|--------|
-| [MDNotebook_0.1.0_x64-setup.exe](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.1.0/MDNotebook_0.1.0_x64-setup.exe) | NSIS (recommended) |
-| [MDNotebook_0.1.0_x64_en-US.msi](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.1.0/MDNotebook_0.1.0_x64_en-US.msi) | MSI |
+| [MDNotebook_0.1.1_x64-setup.exe](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.1.1/MDNotebook_0.1.1_x64-setup.exe) | NSIS (recommended) |
+| [MDNotebook_0.1.1_x64_en-US.msi](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.1.1/MDNotebook_0.1.1_x64_en-US.msi) | MSI |
 
 > Windows may show a SmartScreen warning since the app is not code-signed. Click **"More info"** then **"Run anyway"** to proceed.
 
@@ -68,8 +68,8 @@ Link notes together with `[[Note Name]]` syntax. A backlinks panel shows every n
 - **Zen mode** — Distraction-free fullscreen writing
 - **Mermaid diagrams** — Live-rendered diagram blocks
 - **PDF export** — Print any note to PDF
-- **Markdown export** — Bulk export all notes as `.md` files
-- **Image support** — Paste or drag images directly into the editor
+- **Encrypted image storage** — Paste or drag images into the editor; each image is encrypted and stored as a separate vault asset
+- **Markdown export** — Export individual notes or bulk export all as `.md` files, with vault images embedded as base64
 
 ### Desktop Integration
 - **System tray** — Runs in the background, hides on close
@@ -143,6 +143,17 @@ npm run tauri build  # Production build (outputs MSI + NSIS installers)
 | Testing | Vitest |
 
 ---
+
+## Changelog
+
+### v0.1.1
+- **Encrypted image storage** — Images pasted into notes are now individually encrypted and stored as separate vault assets instead of inline base64, reducing vault size
+- **Fixed export** — "Export as .md" now opens a native save dialog (previously did nothing in Tauri's webview)
+- **Fixed false save notifications** — "Saving.../Saved" no longer triggers when clicking notes or folders without making changes
+- **Note timestamps** — Status bar now shows created and modified dates for the active note
+
+### v0.1.0
+- Initial release — offline encrypted markdown notebook
 
 ## License
 

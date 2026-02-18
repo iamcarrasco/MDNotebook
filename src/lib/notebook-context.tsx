@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useReducer, useEffect, useRef, type ReactNode, type Dispatch } from 'react'
+import { createContext, useContext, useReducer, useEffect, useRef, useMemo, type ReactNode, type Dispatch } from 'react'
 import { TreeItem, ContextMenuState, SortBy, SortDirection, Theme } from './types'
 import type { NoteTemplate } from './templates'
 import {
@@ -11,6 +11,7 @@ import { readVaultFile, writeVaultFile } from './local-vault'
 import { encryptVault, decryptVault, isEncryptedVault } from './crypto'
 import { notify } from './notifications'
 import { validateVaultData } from './validate'
+import { revokeAllCachedUrls, type AssetMeta } from './asset-manager'
 
 // ── Initial sample data ──
 
@@ -177,6 +178,7 @@ export interface NotebookState {
   customTemplates: NoteTemplate[]
   noteVersions: Record<string, Array<{ ts: number; content: string }>>
   treeContentVersion: number
+  assets: Record<string, AssetMeta>
 }
 
 // ── Actions (grouped by domain) ──
@@ -233,6 +235,8 @@ export type VaultAction =
   | { type: 'REMOVE_CUSTOM_TEMPLATE'; name: string }
   | { type: 'SAVE_SNAPSHOT'; noteId: string }
   | { type: 'RESTORE_VERSION'; noteId: string; ts: number }
+  | { type: 'ADD_ASSET'; meta: AssetMeta }
+  | { type: 'REMOVE_ASSET'; assetId: string }
 
 export type NotebookAction = TreeAction | TrashAction | UIAction | TabAction | VaultAction
 
@@ -251,6 +255,7 @@ function getVaultFields(state: NotebookState) {
     autosaveDelay: state.autosaveDelay,
     customTemplates: state.customTemplates,
     noteVersions: state.noteVersions,
+    assets: state.assets,
   }
 }
 
@@ -644,6 +649,14 @@ function reducerInner(state: NotebookState, action: NotebookAction): NotebookSta
       }
     }
 
+    case 'ADD_ASSET':
+      return { ...state, assets: { ...state.assets, [action.meta.id]: action.meta } }
+
+    case 'REMOVE_ASSET': {
+      const { [action.assetId]: _, ...rest } = state.assets
+      return { ...state, assets: rest }
+    }
+
     default:
       return state
   }
@@ -705,6 +718,7 @@ function unmarkDeleted(item: TreeItem): TreeItem {
 
 const NotebookContext = createContext<NotebookState | null>(null)
 const NotebookDispatchContext = createContext<Dispatch<NotebookAction> | null>(null)
+const VaultCredentialsContext = createContext<{ vaultFolder: string; passphrase: string } | null>(null)
 
 export function useNotebook() {
   const ctx = useContext(NotebookContext)
@@ -715,6 +729,12 @@ export function useNotebook() {
 export function useNotebookDispatch() {
   const ctx = useContext(NotebookDispatchContext)
   if (!ctx) throw new Error('useNotebookDispatch must be used within NotebookProvider')
+  return ctx
+}
+
+export function useVaultCredentials() {
+  const ctx = useContext(VaultCredentialsContext)
+  if (!ctx) throw new Error('useVaultCredentials must be used within NotebookProvider')
   return ctx
 }
 
@@ -745,6 +765,7 @@ const defaultState: NotebookState = {
   customTemplates: [],
   noteVersions: {},
   treeContentVersion: 0,
+  assets: {},
 }
 
 function sanitizeCustomTemplates(value: unknown): NoteTemplate[] | null {
@@ -843,6 +864,23 @@ function applyVaultData(data: Partial<NotebookState>): Partial<NotebookState> {
   const noteVersions = sanitizeNoteVersions(obj.noteVersions)
   if (noteVersions) result.noteVersions = noteVersions
 
+  // Assets manifest
+  if (obj.assets && typeof obj.assets === 'object' && !Array.isArray(obj.assets)) {
+    const assets: Record<string, AssetMeta> = {}
+    for (const [id, raw] of Object.entries(obj.assets as Record<string, unknown>)) {
+      if (raw && typeof raw === 'object') {
+        const a = raw as Record<string, unknown>
+        if (typeof a.id === 'string' && typeof a.originalName === 'string' &&
+            typeof a.mimeType === 'string' && typeof a.size === 'number' &&
+            typeof a.createdAt === 'number') {
+          assets[id] = { id: a.id as string, originalName: a.originalName as string,
+            mimeType: a.mimeType as string, size: a.size as number, createdAt: a.createdAt as number }
+        }
+      }
+    }
+    result.assets = assets
+  }
+
   return result as Partial<NotebookState>
 }
 
@@ -939,7 +977,7 @@ export function NotebookProvider({
     //   activeId, openTabs, theme, sidebarWidth — UI navigation
     //   noteVersions — auto-snapshots created during note switch
     //   tree (directly) — folder expand/collapse marked dirty but doesn't trigger save
-  }, [state.treeContentVersion, state.trash, state.vaultLoading, state.autosaveDelay, state.customTemplates, state.sortBy, state.sortDirection])
+  }, [state.treeContentVersion, state.trash, state.vaultLoading, state.autosaveDelay, state.customTemplates, state.sortBy, state.sortDirection, state.assets])
 
   // Flush pending saves on quit (Tauri emits flush-save before exit)
   useEffect(() => {
@@ -1002,11 +1040,20 @@ export function NotebookProvider({
     })
   }, [state.theme])
 
+  // Revoke cached blob URLs on unmount
+  useEffect(() => {
+    return () => revokeAllCachedUrls()
+  }, [])
+
+  const vaultCredentials = useMemo(() => ({ vaultFolder, passphrase }), [vaultFolder, passphrase])
+
   return (
-    <NotebookContext.Provider value={state}>
-      <NotebookDispatchContext.Provider value={dispatch}>
-        {children}
-      </NotebookDispatchContext.Provider>
-    </NotebookContext.Provider>
+    <VaultCredentialsContext.Provider value={vaultCredentials}>
+      <NotebookContext.Provider value={state}>
+        <NotebookDispatchContext.Provider value={dispatch}>
+          {children}
+        </NotebookDispatchContext.Provider>
+      </NotebookContext.Provider>
+    </VaultCredentialsContext.Provider>
   )
 }

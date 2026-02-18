@@ -2,30 +2,69 @@ import { TreeItem } from './types'
 import { genId, flattenNotes } from './tree-utils'
 import { validateVaultData } from './validate'
 import { invoke } from '@tauri-apps/api/core'
+import { loadAssetAsObjectUrl, type AssetMeta } from './asset-manager'
 
-export function exportNoteAsMarkdown(note: TreeItem) {
-  const blob = new Blob([note.content || ''], { type: 'text/markdown' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${note.name.replace(/[^a-zA-Z0-9-_ ]/g, '')}.md`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+// Replace vault:// image references with inline base64 data URLs for self-contained export
+async function resolveVaultImages(
+  content: string,
+  assets: Record<string, AssetMeta>,
+  vaultFolder: string,
+  passphrase: string
+): Promise<string> {
+  const regex = /!\[([^\]]*)\]\(vault:\/\/([a-zA-Z0-9_-]+)\)/g
+  const matches = [...content.matchAll(regex)]
+  if (matches.length === 0) return content
+
+  let result = content
+  for (const match of matches) {
+    const [fullMatch, alt, assetId] = match
+    const meta = assets[assetId]
+    if (!meta) continue
+    try {
+      const blobUrl = await loadAssetAsObjectUrl(vaultFolder, passphrase, assetId, meta.mimeType)
+      const response = await fetch(blobUrl)
+      const blob = await response.blob()
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(blob)
+      })
+      result = result.replace(fullMatch, `![${alt}](${base64})`)
+    } catch {
+      // Keep original vault:// reference if decryption fails
+    }
+  }
+  return result
 }
 
-export function exportAllAsJSON(tree: TreeItem[], trash: TreeItem[]) {
+export async function exportNoteAsMarkdown(
+  note: TreeItem,
+  assets?: Record<string, AssetMeta>,
+  vaultFolder?: string,
+  passphrase?: string
+) {
+  let content = note.content || ''
+  if (assets && vaultFolder && passphrase) {
+    content = await resolveVaultImages(content, assets, vaultFolder, passphrase)
+  }
+  const safeName = note.name.replace(/[^a-zA-Z0-9-_ ]/g, '')
+  await invoke('save_file', {
+    defaultName: `${safeName}.md`,
+    content,
+    filterName: 'Markdown',
+    filterExtensions: ['md'],
+  })
+}
+
+export async function exportAllAsJSON(tree: TreeItem[], trash: TreeItem[]) {
   const data = { version: 1, exportedAt: Date.now(), tree, trash }
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `mdnotebook-backup-${new Date().toISOString().slice(0, 10)}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const content = JSON.stringify(data, null, 2)
+  await invoke('save_file', {
+    defaultName: `mdnotebook-backup-${new Date().toISOString().slice(0, 10)}.json`,
+    content,
+    filterName: 'JSON',
+    filterExtensions: ['json'],
+  })
 }
 
 export function importMarkdownFiles(files: FileList): Promise<TreeItem[]> {
