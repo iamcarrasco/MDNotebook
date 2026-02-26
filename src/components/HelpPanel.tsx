@@ -191,7 +191,9 @@ function MarkdownGuide() {
 
       <section className="help-section">
         <h3>Wiki Links</h3>
-        <p>Link between notes using double brackets: <code>[[Note Name]]</code>. Clicking a wiki link navigates to (or creates) the linked note.</p>
+        <p>Link between notes using double brackets: <code>[[Note Name]]</code>. Clicking a wiki link navigates to the linked note, or prompts to create it if it doesn&apos;t exist.</p>
+        <p>Use the <strong>{'[[]]'}</strong> toolbar button to search your notes and insert a wiki link from rich-text mode. You can also type <code>[[Note Name]]</code> in Source View.</p>
+        <p>The <strong>Backlinks</strong> panel at the bottom of each note shows every note that links to the current one.</p>
       </section>
 
       <section className="help-section">

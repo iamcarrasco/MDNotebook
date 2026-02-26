@@ -46,8 +46,8 @@ Pre-built Windows installers — no dependencies required:
 
 | Installer | Format |
 |-----------|--------|
-| [MDNotebook_0.2.0_x64-setup.exe](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.2.0/MDNotebook_0.2.0_x64-setup.exe) | NSIS (recommended) |
-| [MDNotebook_0.2.0_x64_en-US.msi](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.2.0/MDNotebook_0.2.0_x64_en-US.msi) | MSI |
+| [MDNotebook_0.2.1_x64-setup.exe](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.2.1/MDNotebook_0.2.1_x64-setup.exe) | NSIS (recommended) |
+| [MDNotebook_0.2.1_x64_en-US.msi](https://github.com/iamcarrasco/MDNotebook/releases/download/v0.2.1/MDNotebook_0.2.1_x64_en-US.msi) | MSI |
 
 > Windows may show a SmartScreen warning since the app is not code-signed. Click **"More info"** then **"Run anyway"** to proceed.
 

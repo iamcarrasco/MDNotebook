@@ -27,6 +27,7 @@ import SearchOverlay from '@/components/SearchOverlay'
 import CommandPalette from '@/components/CommandPalette'
 import TemplateManager from '@/components/TemplateManager'
 import FrontmatterEditor from '@/components/FrontmatterEditor'
+import WikiLinkPicker from '@/components/WikiLinkPicker'
 import { ToastProvider, useToast } from '@/components/Toast'
 import type { NoteTemplate } from '@/lib/templates'
 import { CloseIcon } from '@/components/Icons'
@@ -75,6 +76,7 @@ function NotebookApp({
   treeRef.current = state.tree
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [wikiLinkPrompt, setWikiLinkPrompt] = useState<string | null>(null)
+  const [showWikiLinkPicker, setShowWikiLinkPicker] = useState(false)
   const [dialog, setDialog] = useState<{
     title: string
     message: string
@@ -162,6 +164,17 @@ function NotebookApp({
     window.addEventListener('wiki-link-click', handler)
     return () => window.removeEventListener('wiki-link-click', handler)
   }, [dispatch])
+
+  // Wiki-link insert request from toolbar button
+  useEffect(() => {
+    const handler = () => setShowWikiLinkPicker(true)
+    window.addEventListener('wiki-link-insert-request', handler)
+    return () => window.removeEventListener('wiki-link-insert-request', handler)
+  }, [])
+
+  const handleWikiLinkInsert = useCallback((name: string) => {
+    window.dispatchEvent(new CustomEvent('wiki-link-insert', { detail: { name } }))
+  }, [])
 
   const handleCreateWikiLink = useCallback(() => {
     if (!wikiLinkPrompt) return
@@ -693,6 +706,13 @@ function NotebookApp({
         />
       )}
 
+      {showWikiLinkPicker && (
+        <WikiLinkPicker
+          onSelect={handleWikiLinkInsert}
+          onClose={() => setShowWikiLinkPicker(false)}
+        />
+      )}
+
       {showTemplateModal && (
         <TemplateModal
           onSelect={handleNewNoteFromTemplate}
@@ -705,7 +725,7 @@ function NotebookApp({
       {showAbout && (
         <ConfirmModal
           title="About MDNotebook"
-          message="MDNotebook v0.2.0 — An offline, encrypted markdown notebook built for technical writing. Your notes never leave your device."
+          message="MDNotebook v0.2.1 — An offline, encrypted markdown notebook built for technical writing. Your notes never leave your device."
           confirmLabel="OK"
           onConfirm={() => setShowAbout(false)}
           onCancel={() => setShowAbout(false)}

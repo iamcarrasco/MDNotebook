@@ -58,6 +58,20 @@ function markdownLinksToWikiLinks(md: string): string {
   })
 }
 
+// ── Wiki-link toolbar button ──
+
+function InsertWikiLink() {
+  return (
+    <button
+      className="toolbar-wiki-link-btn"
+      title="Insert wiki link [[...]]"
+      onClick={() => window.dispatchEvent(new CustomEvent('wiki-link-insert-request'))}
+    >
+      {'[[]]'}
+    </button>
+  )
+}
+
 // ── Toolbar ──
 
 function EditorToolbar() {
@@ -73,6 +87,7 @@ function EditorToolbar() {
       <ListsToggle />
       <Separator />
       <CreateLink />
+      <InsertWikiLink />
       <InsertTable />
       <InsertThematicBreak />
       <InsertCodeBlock />
@@ -125,6 +140,13 @@ export default function Editor({ markdown: value, onChange, theme = 'light', spe
       if (restored === prevValueRef.current) return
       prevValueRef.current = restored
       onChangeRef.current?.(restored)
+
+      // If raw markdown has [[...]] wiki links (e.g. typed in source view),
+      // convert them to wikilink:// links so rich-text renders them clickable
+      const converted = wikiLinksToMarkdownLinks(restored)
+      if (converted !== md) {
+        editorRef.current?.setMarkdown(converted)
+      }
     })
   }, [])
 
@@ -147,6 +169,18 @@ export default function Editor({ markdown: value, onChange, theme = 'light', spe
     }
     document.addEventListener('click', handleClick, true)
     return () => document.removeEventListener('click', handleClick, true)
+  }, [])
+
+  // Handle wiki-link insertion from toolbar/picker
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { name } = (e as CustomEvent).detail
+      if (name && editorRef.current) {
+        editorRef.current.insertMarkdown(`[${name}](wikilink://${encodeURIComponent(name)})`)
+      }
+    }
+    window.addEventListener('wiki-link-insert', handler)
+    return () => window.removeEventListener('wiki-link-insert', handler)
   }, [])
 
   // Plugins
