@@ -176,9 +176,12 @@ export interface NotebookState {
   lastSavedAt: number | null
   autosaveDelay: number
   customTemplates: NoteTemplate[]
+  disabledTemplates: string[]
   noteVersions: Record<string, Array<{ ts: number; content: string }>>
   treeContentVersion: number
   assets: Record<string, AssetMeta>
+  spellcheck: boolean
+  includeFrontmatter: boolean
 }
 
 // ── Actions (grouped by domain) ──
@@ -197,6 +200,9 @@ export type TreeAction =
   | { type: 'REMOVE_TAG'; noteId: string; tag: string }
   | { type: 'DUPLICATE_NOTE'; id: string }
   | { type: 'IMPORT_ITEMS'; items: TreeItem[] }
+  | { type: 'SET_FRONTMATTER'; noteId: string; frontmatter: Record<string, string> }
+  | { type: 'SET_FRONTMATTER_FIELD'; noteId: string; key: string; value: string }
+  | { type: 'REMOVE_FRONTMATTER_FIELD'; noteId: string; key: string }
 
 export type TrashAction =
   | { type: 'MOVE_TO_TRASH'; id: string }
@@ -233,10 +239,14 @@ export type VaultAction =
   | { type: 'SET_AUTOSAVE_DELAY'; delay: number }
   | { type: 'ADD_CUSTOM_TEMPLATE'; template: NoteTemplate }
   | { type: 'REMOVE_CUSTOM_TEMPLATE'; name: string }
+  | { type: 'TOGGLE_TEMPLATE_ENABLED'; name: string }
+  | { type: 'UPDATE_CUSTOM_TEMPLATE'; oldName: string; template: NoteTemplate }
   | { type: 'SAVE_SNAPSHOT'; noteId: string }
   | { type: 'RESTORE_VERSION'; noteId: string; ts: number }
   | { type: 'ADD_ASSET'; meta: AssetMeta }
   | { type: 'REMOVE_ASSET'; assetId: string }
+  | { type: 'SET_SPELLCHECK'; enabled: boolean }
+  | { type: 'SET_INCLUDE_FRONTMATTER'; enabled: boolean }
 
 export type NotebookAction = TreeAction | TrashAction | UIAction | TabAction | VaultAction
 
@@ -254,8 +264,11 @@ function getVaultFields(state: NotebookState) {
     openTabs: state.openTabs,
     autosaveDelay: state.autosaveDelay,
     customTemplates: state.customTemplates,
+    disabledTemplates: state.disabledTemplates,
     noteVersions: state.noteVersions,
     assets: state.assets,
+    spellcheck: state.spellcheck,
+    includeFrontmatter: state.includeFrontmatter,
   }
 }
 
@@ -496,8 +509,11 @@ function reducerInner(state: NotebookState, action: NotebookAction): NotebookSta
     case 'SET_THEME':
       return { ...state, theme: action.theme }
 
-    case 'TOGGLE_THEME':
-      return { ...state, theme: state.theme === 'light' ? 'dark' : 'light' }
+    case 'TOGGLE_THEME': {
+      const order: Theme[] = ['light', 'dark', 'system']
+      const idx = order.indexOf(state.theme)
+      return { ...state, theme: order[(idx + 1) % order.length] }
+    }
 
     case 'SET_SIDEBAR_WIDTH':
       return { ...state, sidebarWidth: action.width }
@@ -619,7 +635,34 @@ function reducerInner(state: NotebookState, action: NotebookAction): NotebookSta
       return { ...state, customTemplates: [...state.customTemplates, action.template] }
 
     case 'REMOVE_CUSTOM_TEMPLATE':
-      return { ...state, customTemplates: state.customTemplates.filter(t => t.name !== action.name) }
+      return {
+        ...state,
+        customTemplates: state.customTemplates.filter(t => t.name !== action.name),
+        disabledTemplates: state.disabledTemplates.filter(n => n !== action.name),
+      }
+
+    case 'TOGGLE_TEMPLATE_ENABLED': {
+      if (action.name === 'Blank Note') return state
+      const isDisabled = state.disabledTemplates.includes(action.name)
+      return {
+        ...state,
+        disabledTemplates: isDisabled
+          ? state.disabledTemplates.filter(n => n !== action.name)
+          : [...state.disabledTemplates, action.name],
+      }
+    }
+
+    case 'UPDATE_CUSTOM_TEMPLATE': {
+      return {
+        ...state,
+        customTemplates: state.customTemplates.map(t =>
+          t.name === action.oldName ? action.template : t
+        ),
+        disabledTemplates: action.oldName !== action.template.name
+          ? state.disabledTemplates.map(n => n === action.oldName ? action.template.name : n)
+          : state.disabledTemplates,
+      }
+    }
 
     case 'SET_AUTOSAVE_DELAY':
       return { ...state, autosaveDelay: action.delay }
@@ -655,6 +698,53 @@ function reducerInner(state: NotebookState, action: NotebookAction): NotebookSta
     case 'REMOVE_ASSET': {
       const { [action.assetId]: _, ...rest } = state.assets
       return { ...state, assets: rest }
+    }
+
+    case 'SET_SPELLCHECK':
+      return { ...state, spellcheck: action.enabled }
+
+    case 'SET_INCLUDE_FRONTMATTER':
+      return { ...state, includeFrontmatter: action.enabled }
+
+    case 'SET_FRONTMATTER': {
+      const ts = Date.now()
+      return {
+        ...state,
+        tree: mapTree(state.tree, (item) =>
+          item.id === action.noteId && item.type === 'note'
+            ? { ...item, frontmatter: action.frontmatter, updatedAt: ts }
+            : item
+        ),
+      }
+    }
+
+    case 'SET_FRONTMATTER_FIELD': {
+      const ts = Date.now()
+      return {
+        ...state,
+        tree: mapTree(state.tree, (item) => {
+          if (item.id === action.noteId && item.type === 'note') {
+            const fm = { ...(item.frontmatter || {}), [action.key]: action.value }
+            return { ...item, frontmatter: fm, updatedAt: ts }
+          }
+          return item
+        }),
+      }
+    }
+
+    case 'REMOVE_FRONTMATTER_FIELD': {
+      const ts = Date.now()
+      return {
+        ...state,
+        tree: mapTree(state.tree, (item) => {
+          if (item.id === action.noteId && item.type === 'note') {
+            const fm = { ...(item.frontmatter || {}) }
+            delete fm[action.key]
+            return { ...item, frontmatter: Object.keys(fm).length > 0 ? fm : undefined, updatedAt: ts }
+          }
+          return item
+        }),
+      }
     }
 
     default:
@@ -763,9 +853,12 @@ const defaultState: NotebookState = {
   lastSavedAt: null,
   autosaveDelay: 500,
   customTemplates: [],
+  disabledTemplates: [],
   noteVersions: {},
   treeContentVersion: 0,
   assets: {},
+  spellcheck: true,
+  includeFrontmatter: true,
 }
 
 function sanitizeCustomTemplates(value: unknown): NoteTemplate[] | null {
@@ -786,11 +879,14 @@ function sanitizeCustomTemplates(value: unknown): NoteTemplate[] | null {
       tags = obj.tags as string[]
     }
 
+    const category = typeof obj.category === 'string' ? obj.category : undefined
+
     templates.push({
       name: obj.name,
       description: obj.description,
       content: obj.content,
       ...(tags ? { tags } : {}),
+      ...(category ? { category } : {}),
     })
   }
 
@@ -828,6 +924,22 @@ function applyVaultData(data: Partial<NotebookState>): Partial<NotebookState> {
   // Use Array.isArray checks so empty arrays [] are accepted (not falsy-skipped)
   if (Array.isArray(obj.tree)) result.tree = obj.tree
   if (Array.isArray(obj.trash)) result.trash = obj.trash
+
+  // Auto-purge trash items older than 30 days
+  if (Array.isArray(result.trash)) {
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000
+    const cutoff = Date.now() - THIRTY_DAYS
+    const before = (result.trash as TreeItem[]).length
+    result.trash = (result.trash as TreeItem[]).filter(
+      (item: TreeItem) => !item.deletedAt || item.deletedAt >= cutoff
+    )
+    const purged = before - (result.trash as TreeItem[]).length
+    if (purged > 0) {
+      // We'll show a toast from the component side after hydration
+      console.log(`Auto-purged ${purged} trash items older than 30 days`)
+    }
+  }
+
   if (obj.theme) result.theme = obj.theme
   if (obj.sidebarWidth) result.sidebarWidth = obj.sidebarWidth
   if (obj.sortBy) result.sortBy = obj.sortBy
@@ -858,8 +970,22 @@ function applyVaultData(data: Partial<NotebookState>): Partial<NotebookState> {
     result.autosaveDelay = obj.autosaveDelay
   }
 
+  if (typeof obj.spellcheck === 'boolean') {
+    result.spellcheck = obj.spellcheck
+  }
+
+  if (typeof obj.includeFrontmatter === 'boolean') {
+    result.includeFrontmatter = obj.includeFrontmatter
+  }
+
   const templates = sanitizeCustomTemplates(obj.customTemplates)
   if (templates) result.customTemplates = templates
+
+  if (Array.isArray(obj.disabledTemplates)) {
+    result.disabledTemplates = (obj.disabledTemplates as unknown[]).filter(
+      (name): name is string => typeof name === 'string' && name.trim().length > 0
+    )
+  }
 
   const noteVersions = sanitizeNoteVersions(obj.noteVersions)
   if (noteVersions) result.noteVersions = noteVersions
@@ -977,7 +1103,7 @@ export function NotebookProvider({
     //   activeId, openTabs, theme, sidebarWidth — UI navigation
     //   noteVersions — auto-snapshots created during note switch
     //   tree (directly) — folder expand/collapse marked dirty but doesn't trigger save
-  }, [state.treeContentVersion, state.trash, state.vaultLoading, state.autosaveDelay, state.customTemplates, state.sortBy, state.sortDirection, state.assets])
+  }, [state.treeContentVersion, state.trash, state.vaultLoading, state.autosaveDelay, state.customTemplates, state.disabledTemplates, state.sortBy, state.sortDirection, state.assets, state.spellcheck, state.includeFrontmatter])
 
   // Flush pending saves on quit (Tauri emits flush-save before exit)
   useEffect(() => {

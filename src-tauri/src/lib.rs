@@ -36,6 +36,19 @@ fn pick_vault_folder(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn pick_folder(app: tauri::AppHandle) -> Result<String, String> {
+    let folder = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+
+    match folder {
+        Some(path) => Ok(path.to_string()),
+        None => Err("No folder selected".into()),
+    }
+}
+
+#[tauri::command]
 fn read_vault_file(folder: String) -> Result<Option<String>, String> {
     let path = PathBuf::from(&folder).join("vault.json");
     if !path.exists() {
@@ -50,7 +63,13 @@ fn read_vault_file(folder: String) -> Result<Option<String>, String> {
 fn write_vault_file(folder: String, data: String) -> Result<(), String> {
     let dir = PathBuf::from(&folder);
     let path = dir.join("vault.json");
+    let bak_path = dir.join("vault.json.bak");
     let tmp_path = dir.join("vault.json.tmp");
+
+    // Backup: copy existing vault.json to vault.json.bak before writing
+    if path.exists() {
+        let _ = fs::copy(&path, &bak_path);
+    }
 
     // Atomic write: write to temp file then rename
     fs::write(&tmp_path, &data)
@@ -387,6 +406,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_window_theme,
             pick_vault_folder,
+            pick_folder,
             read_vault_file,
             write_vault_file,
             vault_file_exists,

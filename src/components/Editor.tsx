@@ -17,6 +17,9 @@ import {
   diffSourcePlugin,
   markdownShortcutPlugin,
   imagePlugin,
+  directivesPlugin,
+  AdmonitionDirectiveDescriptor,
+  InsertAdmonition,
   InsertImage,
   UndoRedo,
   BoldItalicUnderlineToggles,
@@ -38,6 +41,7 @@ interface EditorProps {
   markdown: string
   onChange?: (markdown: string) => void
   theme?: 'light' | 'dark'
+  spellcheck?: boolean
 }
 
 // ── Wiki-link pre/post processing ──
@@ -73,13 +77,15 @@ function EditorToolbar() {
       <InsertThematicBreak />
       <InsertCodeBlock />
       <InsertImage />
+      <Separator />
+      <InsertAdmonition />
     </DiffSourceToggleWrapper>
   )
 }
 
 // ── Editor Component ──
 
-export default function Editor({ markdown: value, onChange, theme = 'light' }: EditorProps) {
+export default function Editor({ markdown: value, onChange, theme = 'light', spellcheck = true }: EditorProps) {
   const editorRef = useRef<MDXEditorMethods>(null)
   const mermaidContainerRef = useRef<HTMLDivElement>(null)
   const onChangeRef = useRef(onChange)
@@ -148,6 +154,7 @@ export default function Editor({ markdown: value, onChange, theme = 'light' }: E
     headingsPlugin(),
     listsPlugin(),
     quotePlugin(),
+    directivesPlugin({ directiveDescriptors: [AdmonitionDirectiveDescriptor] }),
     thematicBreakPlugin(),
     linkPlugin(),
     linkDialogPlugin(),
@@ -268,7 +275,7 @@ export default function Editor({ markdown: value, onChange, theme = 'light' }: E
   }, [mermaidBlocks, theme])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }} spellCheck={spellcheck}>
       {mounted && (
         <MDXEditor
           ref={editorRef}

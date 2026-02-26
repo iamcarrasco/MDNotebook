@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import { noteTemplates, type NoteTemplate } from '@/lib/templates'
 import { useNotebook, useNotebookDispatch } from '@/lib/notebook-context'
 import { CloseIcon } from './Icons'
@@ -12,8 +13,34 @@ interface TemplateModalProps {
 }
 
 export default function TemplateModal({ onSelect, onClose, currentNoteContent, currentNoteName }: TemplateModalProps) {
-  const { customTemplates } = useNotebook()
+  const { customTemplates, disabledTemplates } = useNotebook()
   const dispatch = useNotebookDispatch()
+
+  const enabledBuiltins = noteTemplates.filter(t => !disabledTemplates.includes(t.name))
+  const enabledCustom = customTemplates.filter(t => !disabledTemplates.includes(t.name))
+
+  // Group all enabled templates by category
+  const grouped = useMemo(() => {
+    const groups: Record<string, { templates: NoteTemplate[]; isCustom: boolean[] }> = {}
+
+    for (const t of enabledBuiltins) {
+      const cat = t.category || 'General'
+      if (!groups[cat]) groups[cat] = { templates: [], isCustom: [] }
+      groups[cat].templates.push(t)
+      groups[cat].isCustom.push(false)
+    }
+
+    for (const t of enabledCustom) {
+      const cat = t.category || 'Custom'
+      if (!groups[cat]) groups[cat] = { templates: [], isCustom: [] }
+      groups[cat].templates.push(t)
+      groups[cat].isCustom.push(true)
+    }
+
+    return groups
+  }, [enabledBuiltins, enabledCustom])
+
+  const categories = Object.keys(grouped)
 
   const handleSaveAsTemplate = () => {
     if (!currentNoteContent && !currentNoteName) return
@@ -40,33 +67,35 @@ export default function TemplateModal({ onSelect, onClose, currentNoteContent, c
             <CloseIcon />
           </button>
         </div>
-        <div className="template-grid">
-          {noteTemplates.map((template) => (
-            <button
-              key={template.name}
-              className="template-card"
-              onClick={() => onSelect(template)}
-            >
-              <span className="template-card-name">{template.name}</span>
-              <span className="template-card-desc">{template.description}</span>
-            </button>
-          ))}
-          {customTemplates.map((template) => (
-            <button
-              key={`custom-${template.name}`}
-              className="template-card template-card-custom"
-              onClick={() => onSelect(template)}
-            >
-              <span className="template-card-name">{template.name}</span>
-              <span className="template-card-desc">{template.description || 'Custom template'}</span>
-              <span
-                className="template-card-delete"
-                onClick={(e) => handleDeleteTemplate(template.name, e)}
-                title="Delete template"
-              >
-                <CloseIcon />
-              </span>
-            </button>
+        <div className="template-grid-grouped">
+          {categories.map((category) => (
+            <div key={category} className="template-category">
+              <span className="template-category-label">{category}</span>
+              <div className="template-grid">
+                {grouped[category].templates.map((template, i) => {
+                  const isCustom = grouped[category].isCustom[i]
+                  return (
+                    <button
+                      key={`${isCustom ? 'custom-' : ''}${template.name}`}
+                      className={`template-card${isCustom ? ' template-card-custom' : ''}`}
+                      onClick={() => onSelect(template)}
+                    >
+                      <span className="template-card-name">{template.name}</span>
+                      <span className="template-card-desc">{template.description || 'Custom template'}</span>
+                      {isCustom && (
+                        <span
+                          className="template-card-delete"
+                          onClick={(e) => handleDeleteTemplate(template.name, e)}
+                          title="Delete template"
+                        >
+                          <CloseIcon />
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           ))}
         </div>
         {currentNoteContent !== undefined && (

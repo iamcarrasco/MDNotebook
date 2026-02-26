@@ -36,9 +36,12 @@ function makeState(overrides: Partial<NotebookState> = {}): NotebookState {
     selectedFolderId: null,
     autosaveDelay: 500,
     customTemplates: [],
+    disabledTemplates: [],
     noteVersions: {},
     treeContentVersion: 0,
     assets: {},
+    spellcheck: true,
+    includeFrontmatter: true,
     ...overrides,
   }
 }
@@ -285,12 +288,14 @@ describe('Theme', () => {
     expect(result.theme).toBe('dark')
   })
 
-  test('TOGGLE_THEME toggles', () => {
+  test('TOGGLE_THEME cycles light → dark → system → light', () => {
     const s = makeState({ theme: 'light' })
     const r1 = dispatch(s, { type: 'TOGGLE_THEME' })
     expect(r1.theme).toBe('dark')
     const r2 = dispatch(r1, { type: 'TOGGLE_THEME' })
-    expect(r2.theme).toBe('light')
+    expect(r2.theme).toBe('system')
+    const r3 = dispatch(r2, { type: 'TOGGLE_THEME' })
+    expect(r3.theme).toBe('light')
   })
 })
 
@@ -472,5 +477,56 @@ describe('default case', () => {
     const s = makeState()
     const result = reducer(s, { type: 'UNKNOWN' } as unknown as NotebookAction)
     expect(result).toBe(s)
+  })
+})
+
+describe('SET_INCLUDE_FRONTMATTER', () => {
+  test('sets includeFrontmatter to false', () => {
+    const s = makeState({ includeFrontmatter: true })
+    const result = dispatch(s, { type: 'SET_INCLUDE_FRONTMATTER', enabled: false })
+    expect(result.includeFrontmatter).toBe(false)
+  })
+
+  test('sets includeFrontmatter to true', () => {
+    const s = makeState({ includeFrontmatter: false })
+    const result = dispatch(s, { type: 'SET_INCLUDE_FRONTMATTER', enabled: true })
+    expect(result.includeFrontmatter).toBe(true)
+  })
+})
+
+describe('Frontmatter actions', () => {
+  test('SET_FRONTMATTER sets frontmatter on a note', () => {
+    const s = makeState()
+    const fm = { author: 'Alice', status: 'draft' }
+    const result = dispatch(s, { type: 'SET_FRONTMATTER', noteId: 'n1', frontmatter: fm })
+    expect(result.tree[0].frontmatter).toEqual(fm)
+    expect(result.tree[0].updatedAt).toBeGreaterThan(1000)
+  })
+
+  test('SET_FRONTMATTER_FIELD adds a single field', () => {
+    const s = makeState()
+    const result = dispatch(s, { type: 'SET_FRONTMATTER_FIELD', noteId: 'n1', key: 'author', value: 'Bob' })
+    expect(result.tree[0].frontmatter).toEqual({ author: 'Bob' })
+  })
+
+  test('SET_FRONTMATTER_FIELD updates an existing field', () => {
+    const note = { ...makeNote('n1', 'Note'), frontmatter: { author: 'Alice' } }
+    const s = makeState({ tree: [note] })
+    const result = dispatch(s, { type: 'SET_FRONTMATTER_FIELD', noteId: 'n1', key: 'author', value: 'Bob' })
+    expect(result.tree[0].frontmatter).toEqual({ author: 'Bob' })
+  })
+
+  test('REMOVE_FRONTMATTER_FIELD removes a field', () => {
+    const note = { ...makeNote('n1', 'Note'), frontmatter: { author: 'Alice', status: 'draft' } }
+    const s = makeState({ tree: [note] })
+    const result = dispatch(s, { type: 'REMOVE_FRONTMATTER_FIELD', noteId: 'n1', key: 'author' })
+    expect(result.tree[0].frontmatter).toEqual({ status: 'draft' })
+  })
+
+  test('REMOVE_FRONTMATTER_FIELD clears frontmatter when last field removed', () => {
+    const note = { ...makeNote('n1', 'Note'), frontmatter: { author: 'Alice' } }
+    const s = makeState({ tree: [note] })
+    const result = dispatch(s, { type: 'REMOVE_FRONTMATTER_FIELD', noteId: 'n1', key: 'author' })
+    expect(result.tree[0].frontmatter).toBeUndefined()
   })
 })

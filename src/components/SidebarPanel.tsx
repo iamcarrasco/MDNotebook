@@ -4,19 +4,16 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragMoveEvent, type DragStartEvent } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useNotebook, useNotebookDispatch } from '@/lib/notebook-context'
+import { useToast } from '@/components/Toast'
 import {
-  filterTree, sortTree, hasChildren, isDescendant, buildSearchIndex, collectAllTags,
+  filterTree, sortTree, hasChildren, isDescendant, buildSearchIndex, collectAllTags, findItem,
 } from '@/lib/tree-utils'
-import { exportAllAsJSON, importMarkdownFiles, parseJSONBackup } from '@/lib/export-import'
 import SidebarItem from '@/components/SidebarItem'
-import SearchBar from '@/components/SearchBar'
 import ResizeHandle from '@/components/ResizeHandle'
 import ConfirmModal from '@/components/ConfirmModal'
 import PanelErrorBoundary from '@/components/PanelErrorBoundary'
 import {
-  MoonIcon, SunIcon, ExportIcon, ImportIcon, SortIcon,
-  TrashIcon, RestoreIcon, CloseIcon, GearIcon, CalendarIcon,
-  TemplateIcon, HelpIcon,
+  SortIcon, TrashIcon, RestoreIcon, CloseIcon,
 } from '@/components/Icons'
 import type { TreeItem, SortBy } from '@/lib/types'
 
@@ -42,27 +39,10 @@ function filterTreeByTag(items: TreeItem[], tags: string[], mode: 'and' | 'or'):
 
 // ── Component ──
 
-interface Props {
-  vaultName: string
-  activeParentId: string | null
-  onOpenSettings?: () => void
-  onOpenHelp?: () => void
-  onOpenTemplateModal: () => void
-  onDailyNote: () => void
-}
-
-export default function SidebarPanel({
-  vaultName,
-  activeParentId,
-  onOpenSettings,
-  onOpenHelp,
-  onOpenTemplateModal,
-  onDailyNote,
-}: Props) {
+export default function SidebarPanel() {
   const state = useNotebook()
   const dispatch = useNotebookDispatch()
-  const importRef = useRef<HTMLInputElement>(null)
-  const importJsonRef = useRef<HTMLInputElement>(null)
+  const { showToast } = useToast()
   const sidebarTreeRef = useRef<HTMLDivElement>(null)
   const dropIndicatorRef = useRef<{ targetId: string; position: 'before' | 'after' | 'inside' } | null>(null)
   const [dropIndicator, setDropIndicator] = useState<{ targetId: string; position: 'before' | 'after' | 'inside' } | null>(null)
@@ -82,7 +62,7 @@ export default function SidebarPanel({
   } | null>(null)
 
   const {
-    tree, trash, searchQuery, theme, sidebarWidth,
+    tree, trash, searchQuery, sidebarWidth,
     sortBy, sortDirection, tagFilter, tagFilterMode,
   } = state
 
@@ -265,18 +245,15 @@ export default function SidebarPanel({
   }, [notesDndEnabled, stopPointerTracking])
 
   const handleDelete = useCallback((id: string) => {
-    if (hasChildren(tree, id)) {
-      setDialog({
-        title: 'Delete Folder',
-        message: 'This folder has items inside it. Delete anyway?',
-        confirmLabel: 'Delete',
-        onConfirm: () => { dispatch({ type: 'MOVE_TO_TRASH', id }); setDialog(null) },
-        danger: true,
-      })
-      return
-    }
+    const item = findItem(tree, id)
     dispatch({ type: 'MOVE_TO_TRASH', id })
-  }, [tree, dispatch])
+    showToast(`Moved "${item?.name || 'item'}" to trash`, {
+      action: {
+        label: 'Undo',
+        onClick: () => dispatch({ type: 'RESTORE_FROM_TRASH', id }),
+      },
+    })
+  }, [tree, dispatch, showToast])
 
   const handleSortSelect = useCallback((newSortBy: SortBy, direction: 'asc' | 'desc') => {
     dispatch({ type: 'SET_SORT', sortBy: newSortBy, direction })
@@ -291,75 +268,8 @@ export default function SidebarPanel({
     return () => document.removeEventListener('click', close)
   }, [showSortMenu])
 
-  const handleImportMd = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files) return
-    try {
-      const items = await importMarkdownFiles(files)
-      dispatch({ type: 'IMPORT_ITEMS', items })
-    } catch (err) {
-      setDialog({
-        title: 'Import Failed',
-        message: err instanceof Error ? err.message : 'Could not read one or more files.',
-        confirmLabel: 'OK',
-        onConfirm: () => setDialog(null),
-        showCancel: false,
-      })
-    }
-    e.target.value = ''
-  }, [dispatch])
-
-  const handleImportJson = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    let text: string
-    try {
-      text = await file.text()
-    } catch {
-      setDialog({
-        title: 'Import Failed',
-        message: 'Could not read the backup file. It may be corrupted or inaccessible.',
-        confirmLabel: 'OK',
-        onConfirm: () => setDialog(null),
-        showCancel: false,
-      })
-      e.target.value = ''
-      return
-    }
-    const data = parseJSONBackup(text)
-    if (data) {
-      setDialog({
-        title: 'Restore Backup',
-        message: 'Replace all notes with this backup, or merge the backup into your existing notes?',
-        confirmLabel: 'Replace',
-        cancelLabel: 'Merge',
-        onConfirm: () => {
-          dispatch({ type: 'LOAD_STATE', state: { tree: data.tree, trash: data.trash } })
-          setDialog(null)
-        },
-        onCancelAction: () => {
-          dispatch({ type: 'IMPORT_ITEMS', items: data.tree })
-          setDialog(null)
-        },
-      })
-    } else {
-      setDialog({
-        title: 'Invalid Backup',
-        message: 'This file is not a valid MDNotebook backup.',
-        confirmLabel: 'OK',
-        onConfirm: () => setDialog(null),
-        showCancel: false,
-      })
-    }
-    e.target.value = ''
-  }, [dispatch])
-
   return (
     <PanelErrorBoundary panelName="Sidebar">
-      {/* Hidden file inputs */}
-      <input ref={importRef} type="file" accept=".md,.txt" multiple hidden onChange={handleImportMd} />
-      <input ref={importJsonRef} type="file" accept=".json" hidden onChange={handleImportJson} />
-
       <div className="sidebar-backdrop" onClick={() => dispatch({ type: 'TOGGLE_SIDEBAR' })} />
       <aside className="sidebar" style={{ width: sidebarWidth, minWidth: sidebarWidth }}>
         <div className="sidebar-header">
@@ -367,66 +277,7 @@ export default function SidebarPanel({
             <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
           </svg>
           MDNotebook
-          <div className="sidebar-actions">
-            <button
-              className="sidebar-action-btn"
-              title={theme === 'light' ? 'Dark Mode (Ctrl+Shift+D)' : 'Light Mode (Ctrl+Shift+D)'}
-              onClick={() => dispatch({ type: 'TOGGLE_THEME' })}
-            >
-              {theme === 'light' ? <MoonIcon /> : <SunIcon />}
-            </button>
-            <button
-              className="sidebar-action-btn"
-              title="New Note (Ctrl+N)"
-              onClick={() => dispatch({ type: 'ADD_ITEM', parentId: activeParentId, itemType: 'note' })}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-                <path d="M3 1h7l4 4v10H3V1z" />
-                <path d="M8 6v5M5.5 8.5h5" />
-              </svg>
-            </button>
-            <button
-              className="sidebar-action-btn"
-              title="New Folder (Ctrl+Shift+N)"
-              onClick={() => dispatch({ type: 'ADD_ITEM', parentId: activeParentId, itemType: 'folder' })}
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-                <path d="M2 3h4l2 2h6v8H2V3z" />
-                <path d="M8 7v4M6 9h4" />
-              </svg>
-            </button>
-            <button
-              className="sidebar-action-btn"
-              title="Daily Note (Ctrl+Shift+T)"
-              onClick={onDailyNote}
-            >
-              <CalendarIcon />
-            </button>
-            <button
-              className="sidebar-action-btn"
-              title="New from Template"
-              onClick={onOpenTemplateModal}
-            >
-              <TemplateIcon />
-            </button>
-          </div>
         </div>
-
-        {/* Settings button */}
-        {onOpenSettings && (
-          <div className="sidebar-user">
-            <span className="sidebar-user-name">{vaultName}</span>
-            <button
-              className="sidebar-user-btn"
-              onClick={onOpenSettings}
-              title="Settings"
-            >
-              <GearIcon />
-            </button>
-          </div>
-        )}
-
-        <SearchBar />
 
         {/* Sort & filter controls */}
         <div className="sidebar-controls">
@@ -557,31 +408,6 @@ export default function SidebarPanel({
           )}
           {displayTree.length === 0 && searchQuery && (
             <div className="sidebar-empty">No matching notes</div>
-          )}
-        </div>
-
-        {/* Import/Export */}
-        <div className="sidebar-footer">
-          <button className="sidebar-footer-btn" onClick={() => importRef.current?.click()} title="Import Markdown files">
-            <ImportIcon /> Import
-          </button>
-          <button className="sidebar-footer-btn" onClick={() => {
-            setDialog({
-              title: 'Export Unencrypted Backup',
-              message: 'This will export all notes as an unencrypted JSON file. Store the backup securely.',
-              confirmLabel: 'Export',
-              onConfirm: () => { exportAllAsJSON(tree, trash); setDialog(null) },
-            })
-          }} title="Export all as JSON backup (unencrypted)">
-            <ExportIcon /> Export
-          </button>
-          <button className="sidebar-footer-btn" onClick={() => importJsonRef.current?.click()} title="Import JSON backup">
-            <ImportIcon /> Restore
-          </button>
-          {onOpenHelp && (
-            <button className="sidebar-footer-btn" onClick={onOpenHelp} title="Help &amp; How to Use">
-              <HelpIcon /> Help
-            </button>
           )}
         </div>
 

@@ -1,6 +1,6 @@
 {
   "name": "mdnotebook",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "description": "Offline-first encrypted markdown notebook desktop app.",
@@ -38,7 +38,7 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
     "eslint-config-next": "^16.1.6",
-    "typescript": "^5.9.3",
+    "typescript": "5.9.3",
     "vitest": "^2.0.0"
   }
 }

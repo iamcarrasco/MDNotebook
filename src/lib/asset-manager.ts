@@ -69,3 +69,20 @@ export function revokeAllCachedUrls(): void {
   }
   objectUrlCache.clear()
 }
+
+export async function reEncryptAllAssets(
+  vaultFolder: string,
+  oldPassphrase: string,
+  newPassphrase: string
+): Promise<number> {
+  const assetIds = await invoke<string[]>('list_vault_assets', { folder: vaultFolder })
+  for (const assetId of assetIds) {
+    const encrypted = await invoke<string>('read_vault_asset', { folder: vaultFolder, assetId })
+    const plainBuffer = await decryptAsset(encrypted, oldPassphrase)
+    const reEncrypted = await encryptAsset(plainBuffer, newPassphrase)
+    await invoke('write_vault_asset', { folder: vaultFolder, assetId, data: reEncrypted })
+  }
+  // Invalidate cached blob URLs since they were decrypted with the old passphrase
+  revokeAllCachedUrls()
+  return assetIds.length
+}

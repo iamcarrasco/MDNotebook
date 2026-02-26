@@ -1,28 +1,13 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { getPassphraseStrength } from '@/lib/crypto'
 
 interface PassphraseScreenProps {
   mode: 'setup' | 'unlock'
   onSubmit: (passphrase: string) => void
   error?: string | null
   loading?: boolean
-}
-
-function getPassphraseStrength(passphrase: string): { level: 0 | 1 | 2 | 3; label: string; color: string } {
-  if (passphrase.length === 0) return { level: 0, label: '', color: 'transparent' }
-
-  let score = 0
-  if (passphrase.length >= 8) score++
-  if (passphrase.length >= 12) score++
-  if (passphrase.length >= 16) score++
-  if (/[a-z]/.test(passphrase) && /[A-Z]/.test(passphrase)) score++
-  if (/\d/.test(passphrase)) score++
-  if (/[^a-zA-Z0-9]/.test(passphrase)) score++
-
-  if (score <= 2) return { level: 1, label: 'Weak', color: 'var(--danger)' }
-  if (score <= 4) return { level: 2, label: 'Fair', color: '#e6a817' }
-  return { level: 3, label: 'Strong', color: 'var(--accent)' }
 }
 
 export default function PassphraseScreen({ mode, onSubmit, error, loading }: PassphraseScreenProps) {

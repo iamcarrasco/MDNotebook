@@ -26,10 +26,10 @@ export default function ConfirmModal({
   showCancel = true,
   danger = false,
 }: ConfirmModalProps) {
-  const confirmRef = useRef<HTMLButtonElement>(null)
+  const focusRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    confirmRef.current?.focus()
+    focusRef.current?.focus()
   }, [])
 
   useEffect(() => {
@@ -54,12 +54,16 @@ export default function ConfirmModal({
         </div>
         <div className="confirm-modal-actions">
           {showCancel && (
-            <button className="confirm-modal-cancel" onClick={onCancelAction || onCancel}>
+            <button
+              ref={danger ? focusRef : undefined}
+              className="confirm-modal-cancel"
+              onClick={onCancelAction || onCancel}
+            >
               {cancelLabel}
             </button>
           )}
           <button
-            ref={confirmRef}
+            ref={danger ? undefined : focusRef}
             className={danger ? 'auth-btn confirm-modal-danger' : 'auth-btn'}
             onClick={onConfirm}
           >

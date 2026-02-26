@@ -12,6 +12,7 @@ export interface TreeItem {
   deletedAt?: number
   tags?: string[]
   pinned?: boolean
+  frontmatter?: Record<string, string>
 }
 
 export interface ContextMenuState {
@@ -23,4 +24,4 @@ export interface ContextMenuState {
 
 export type SortBy = 'manual' | 'name' | 'modified' | 'created'
 export type SortDirection = 'asc' | 'desc'
-export type Theme = 'light' | 'dark'
+export type Theme = 'light' | 'dark' | 'system'

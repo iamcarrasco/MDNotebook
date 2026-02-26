@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { NotebookProvider, useNotebook, useNotebookDispatch } from '@/lib/notebook-context'
+import { NotebookProvider, useNotebook, useNotebookDispatch, useVaultCredentials } from '@/lib/notebook-context'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { findNote, findNoteByName, genId, findParentPath, hasChildren } from '@/lib/tree-utils'
 import SidebarPanel from '@/components/SidebarPanel'
@@ -22,8 +22,15 @@ import EditorErrorBoundary from '@/components/EditorErrorBoundary'
 import AppErrorBoundary from '@/components/AppErrorBoundary'
 import PanelErrorBoundary from '@/components/PanelErrorBoundary'
 import ConfirmModal from '@/components/ConfirmModal'
+import HeaderBar from '@/components/HeaderBar'
+import SearchOverlay from '@/components/SearchOverlay'
+import CommandPalette from '@/components/CommandPalette'
+import TemplateManager from '@/components/TemplateManager'
+import FrontmatterEditor from '@/components/FrontmatterEditor'
+import { ToastProvider, useToast } from '@/components/Toast'
 import type { NoteTemplate } from '@/lib/templates'
-import { CloseIcon, ZenIcon, PDFIcon } from '@/components/Icons'
+import { CloseIcon } from '@/components/Icons'
+import { exportNoteAsMarkdown, exportNoteAsHTML, exportAllAsJSON, exportAllAsMarkdownFolder } from '@/lib/export-import'
 import { checkVaultStatus, vaultFileExists, readVaultFile, writeVaultFile } from '@/lib/local-vault'
 import { isEncryptedVault, verifyPassphrase, encryptVault } from '@/lib/crypto'
 import { listen } from '@tauri-apps/api/event'
@@ -57,11 +64,13 @@ function NotebookApp({
   onOpenHelp,
 }: {
   vaultName: string
-  onOpenSettings?: () => void
-  onOpenHelp?: () => void
+  onOpenSettings: () => void
+  onOpenHelp: () => void
 }) {
   const state = useNotebook()
   const dispatch = useNotebookDispatch()
+  const { vaultFolder, passphrase } = useVaultCredentials()
+  const { showToast } = useToast()
   const treeRef = useRef(state.tree)
   treeRef.current = state.tree
   const [showTemplateModal, setShowTemplateModal] = useState(false)
@@ -74,16 +83,64 @@ function NotebookApp({
     showCancel?: boolean
   } | null>(null)
 
+  // Search overlay state
+  const [searchVisible, setSearchVisible] = useState(false)
+
+  // Command Palette state
+  const [commandPaletteVisible, setCommandPaletteVisible] = useState(false)
+
+  // About dialog
+  const [showAbout, setShowAbout] = useState(false)
+
+  // Template Manager
+  const [showTemplateManager, setShowTemplateManager] = useState(false)
+
   useKeyboardShortcuts()
 
   const {
-    tree, activeId, saveStatus, theme, sidebarVisible, zenMode,
-    renamingId, selectedFolderId,
+    tree, trash, activeId, saveStatus, theme, sidebarVisible, zenMode,
+    renamingId, selectedFolderId, searchQuery, assets, spellcheck, includeFrontmatter,
   } = state
 
   const activeNote = useMemo(() => findNote(tree, activeId), [tree, activeId])
 
+  // Resolve effective theme from system preference
+  const effectiveTheme = useMemo(() => {
+    if (theme !== 'system') return theme
+    if (typeof window === 'undefined') return 'light'
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }, [theme])
+
+  // Listen for system theme changes when theme is 'system'
+  useEffect(() => {
+    if (theme !== 'system') return
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => {
+      // Force re-render by toggling a dummy attribute on document
+      document.documentElement.setAttribute(
+        'data-theme',
+        mql.matches ? 'dark' : 'light'
+      )
+    }
+    handler() // Set initial
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [theme])
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', effectiveTheme)
+  }, [effectiveTheme])
+
   const activeParentId = useMemo(() => {
+    if (selectedFolderId) return selectedFolderId
+    if (!activeId) return null
+    const path = findParentPath(tree, activeId)
+    if (path && path.length > 0) return path[path.length - 1].id
+    return null
+  }, [tree, activeId, selectedFolderId])
+
+  const getParentId = useCallback((): string | null => {
     if (selectedFolderId) return selectedFolderId
     if (!activeId) return null
     const path = findParentPath(tree, activeId)
@@ -157,6 +214,40 @@ function NotebookApp({
     prevRenamingRef.current = renamingId
   }, [renamingId])
 
+  // Blank Note handler (one-click)
+  const handleNewBlankNote = useCallback(() => {
+    const ts = Date.now()
+    const newItem: TreeItem = {
+      id: genId(),
+      name: 'Untitled Note',
+      type: 'note',
+      content: '',
+      createdAt: ts,
+      updatedAt: ts,
+    }
+    dispatch({ type: 'IMPORT_ITEMS', items: [newItem] })
+    dispatch({ type: 'SET_ACTIVE', id: newItem.id })
+  }, [dispatch])
+
+  // Meeting Notes handler (one-click)
+  const handleNewMeetingNotes = useCallback(() => {
+    const ts = Date.now()
+    const dateStr = new Date().toISOString().slice(0, 10)
+    const content = `# Meeting Notes\n\n**Date**: ${dateStr}\n**Attendees**:\n\n## Agenda\n\n1.\n\n## Discussion\n\n-\n\n## Action Items\n\n- [ ]\n\n## Next Steps\n\n`
+    const newItem: TreeItem = {
+      id: genId(),
+      name: 'Meeting Notes',
+      type: 'note',
+      content,
+      createdAt: ts,
+      updatedAt: ts,
+      tags: ['meeting'],
+    }
+    dispatch({ type: 'IMPORT_ITEMS', items: [newItem] })
+    dispatch({ type: 'SET_ACTIVE', id: newItem.id })
+    dispatch({ type: 'START_RENAME', id: newItem.id, name: newItem.name })
+  }, [dispatch])
+
   // Daily Note handler
   const handleDailyNote = useCallback(() => {
     const today = new Date()
@@ -188,9 +279,13 @@ function NotebookApp({
   // New note from template
   const handleNewNoteFromTemplate = useCallback((template: NoteTemplate) => {
     const ts = Date.now()
+    const dateStr = new Date().toISOString().slice(0, 10)
+    let name = template.name
+    if (name === 'Blank Note') name = 'Untitled Note'
+    else if (name === 'Daily Note') name = `${dateStr} - Daily Note`
     const newItem: TreeItem = {
       id: genId(),
-      name: template.name === 'Blank Note' ? 'Untitled Note' : template.name,
+      name,
       type: 'note',
       content: template.content,
       createdAt: ts,
@@ -209,6 +304,84 @@ function NotebookApp({
     window.print()
   }, [])
 
+  // Export handlers for header bar menu
+  const handleExportMarkdown = useCallback(async () => {
+    if (!activeNote) return
+    try {
+      await exportNoteAsMarkdown(activeNote, assets, vaultFolder, passphrase, includeFrontmatter)
+      showToast('Exported as Markdown')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!msg.includes('cancelled') && !msg.includes('No file selected')) {
+        showToast(msg || 'Export failed')
+      }
+    }
+  }, [activeNote, assets, vaultFolder, passphrase, includeFrontmatter, showToast])
+
+  const handleExportHTML = useCallback(async () => {
+    if (!activeNote) return
+    try {
+      await exportNoteAsHTML(activeNote, assets, vaultFolder, passphrase)
+      showToast('Exported as HTML')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!msg.includes('cancelled') && !msg.includes('No file selected')) {
+        showToast(msg || 'Export failed')
+      }
+    }
+  }, [activeNote, assets, vaultFolder, passphrase, showToast])
+
+  const handleExportJSON = useCallback(async () => {
+    try {
+      await exportAllAsJSON(tree, trash)
+      showToast('Exported vault backup')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!msg.includes('cancelled') && !msg.includes('No file selected')) {
+        showToast(msg || 'Export failed')
+      }
+    }
+  }, [tree, trash, showToast])
+
+  const handleExportAllMarkdown = useCallback(async () => {
+    try {
+      const count = await exportAllAsMarkdownFolder(tree, includeFrontmatter)
+      showToast(`Exported ${count} notes as Markdown`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!msg.includes('cancelled') && !msg.includes('No folder selected')) {
+        showToast(msg || 'Export failed')
+      }
+    }
+  }, [tree, includeFrontmatter, showToast])
+
+  // Event listeners for keyboard shortcuts (custom events from useKeyboardShortcuts)
+  useEffect(() => {
+    const onOpenSearch = () => setSearchVisible(v => !v)
+    const onOpenCommandPalette = () => setCommandPaletteVisible(true)
+    const onOpenPreferences = () => onOpenSettings()
+    const onOpenTemplateModal = () => handleNewBlankNote()
+    const onOpenMenu = () => {
+      // Trigger a click on the menu button in the header bar
+      const menuBtn = document.querySelector('.header-menu-wrapper .header-bar-btn') as HTMLElement
+      menuBtn?.click()
+    }
+
+    window.addEventListener('open-search', onOpenSearch)
+    window.addEventListener('open-command-palette', onOpenCommandPalette)
+    window.addEventListener('open-preferences', onOpenPreferences)
+    window.addEventListener('open-template-modal', onOpenTemplateModal)
+    window.addEventListener('open-menu', onOpenMenu)
+
+    return () => {
+      window.removeEventListener('open-search', onOpenSearch)
+      window.removeEventListener('open-command-palette', onOpenCommandPalette)
+      window.removeEventListener('open-preferences', onOpenPreferences)
+      window.removeEventListener('open-template-modal', onOpenTemplateModal)
+      window.removeEventListener('open-menu', onOpenMenu)
+    }
+  }, [onOpenSettings, handleNewBlankNote])
+
   // Daily note shortcut listener
   useEffect(() => {
     const handler = () => handleDailyNote()
@@ -219,7 +392,7 @@ function NotebookApp({
   // System tray event listeners
   useEffect(() => {
     const unlisten1 = listen('tray-new-note', () => {
-      dispatch({ type: 'ADD_ITEM', parentId: null, itemType: 'note' })
+      handleNewBlankNote()
     })
     const unlisten2 = listen('tray-daily-note', () => {
       handleDailyNote()
@@ -228,7 +401,7 @@ function NotebookApp({
       unlisten1.then(fn => fn()).catch(err => console.warn('Failed to unlisten tray-new-note:', err))
       unlisten2.then(fn => fn()).catch(err => console.warn('Failed to unlisten tray-daily-note:', err))
     }
-  }, [dispatch, handleDailyNote])
+  }, [dispatch, handleNewBlankNote, handleDailyNote])
 
   // File association: handle .md files opened with MDNotebook
   useEffect(() => {
@@ -273,17 +446,60 @@ function NotebookApp({
 
   // Context menu delete handler (needs confirmation for folders with children)
   const handleDelete = useCallback((id: string) => {
-    if (hasChildren(tree, id)) {
-      setDialog({
-        title: 'Delete Folder',
-        message: 'This folder has items inside it. Delete anyway?',
-        confirmLabel: 'Delete',
-        onConfirm: () => { dispatch({ type: 'MOVE_TO_TRASH', id }); setDialog(null) },
-      })
-      return
-    }
+    const item = findNote(tree, id) || tree.find(i => i.id === id)
     dispatch({ type: 'MOVE_TO_TRASH', id })
-  }, [tree, dispatch])
+    showToast(`Moved "${item?.name || 'item'}" to trash`, {
+      action: {
+        label: 'Undo',
+        onClick: () => dispatch({ type: 'RESTORE_FROM_TRASH', id }),
+      },
+    })
+  }, [tree, dispatch, showToast])
+
+  // Command palette actions
+  const commandActions = useMemo(() => [
+    { id: 'new-note', label: 'New Blank Note', shortcut: 'Ctrl+N', section: 'Notes', action: handleNewBlankNote },
+    { id: 'new-folder', label: 'New Folder', shortcut: 'Ctrl+Shift+N', section: 'Notes', action: () => dispatch({ type: 'ADD_ITEM', parentId: getParentId(), itemType: 'folder' }) },
+    { id: 'daily-note', label: 'New Daily Note', shortcut: 'Ctrl+Shift+T', section: 'Notes', action: handleDailyNote },
+    { id: 'meeting-notes', label: 'New Meeting Notes', section: 'Notes', action: handleNewMeetingNotes },
+    { id: 'more-templates', label: 'More Templates…', section: 'Notes', action: () => setShowTemplateModal(true) },
+    { id: 'search-notes', label: 'Search All Notes', shortcut: 'Ctrl+Shift+F', section: 'Edit', action: () => setSearchVisible(true) },
+    { id: 'zen-mode', label: 'Toggle Zen Mode', shortcut: 'Ctrl+Shift+Z', section: 'View', action: () => dispatch({ type: 'TOGGLE_ZEN_MODE' }) },
+    { id: 'toggle-sidebar', label: 'Toggle Sidebar', shortcut: 'F9', section: 'View', action: () => dispatch({ type: 'TOGGLE_SIDEBAR' }) },
+    { id: 'toggle-theme', label: 'Cycle Theme', shortcut: 'Ctrl+Shift+D', section: 'View', action: () => dispatch({ type: 'TOGGLE_THEME' }) },
+    { id: 'export-pdf', label: 'Export as PDF', section: 'Export', action: handleExportPDF },
+    { id: 'export-md', label: 'Export as Markdown', section: 'Export', action: handleExportMarkdown },
+    { id: 'export-html', label: 'Export as HTML', section: 'Export', action: handleExportHTML },
+    { id: 'export-json', label: 'Export All as JSON', section: 'Export', action: handleExportJSON },
+    { id: 'export-all-md', label: 'Export All as Markdown', section: 'Export', action: handleExportAllMarkdown },
+    { id: 'manage-templates', label: 'Manage Templates', section: 'Settings', action: () => setShowTemplateManager(true) },
+    { id: 'preferences', label: 'Preferences', shortcut: 'Ctrl+,', section: 'Settings', action: onOpenSettings },
+    { id: 'help', label: 'Help', shortcut: 'F1', section: 'Settings', action: onOpenHelp },
+  ], [dispatch, getParentId, handleNewBlankNote, handleDailyNote, handleNewMeetingNotes, handleExportPDF, handleExportMarkdown, handleExportHTML, handleExportJSON, handleExportAllMarkdown, onOpenSettings, onOpenHelp])
+
+  // Search query handler for the overlay
+  const handleSearchQueryChange = useCallback((q: string) => {
+    dispatch({ type: 'SET_SEARCH_QUERY', query: q })
+  }, [dispatch])
+
+  // Count search results
+  const searchResultCount = useMemo(() => {
+    if (!searchQuery.trim()) return 0
+    const lower = searchQuery.toLowerCase()
+    let count = 0
+    const countInTree = (items: TreeItem[]) => {
+      for (const item of items) {
+        if (item.type === 'note') {
+          if (item.name.toLowerCase().includes(lower) || (item.content || '').toLowerCase().includes(lower)) {
+            count++
+          }
+        }
+        if (item.children) countInTree(item.children)
+      }
+    }
+    countInTree(tree)
+    return count
+  }, [tree, searchQuery])
 
   // Loading state
   if (state.vaultLoading) {
@@ -332,7 +548,8 @@ function NotebookApp({
                 key={activeId}
                 markdown={activeNote.content || ''}
                 onChange={(md) => dispatch({ type: 'UPDATE_NOTE_CONTENT', id: activeId, content: md })}
-                theme={theme}
+                theme={effectiveTheme}
+                spellcheck={spellcheck}
               />
             </EditorErrorBoundary>
           </div>
@@ -349,14 +566,7 @@ function NotebookApp({
 
       {/* Sidebar */}
       {sidebarVisible && (
-        <SidebarPanel
-          vaultName={vaultName}
-          activeParentId={activeParentId}
-          onOpenSettings={onOpenSettings}
-          onOpenHelp={onOpenHelp}
-          onOpenTemplateModal={() => setShowTemplateModal(true)}
-          onDailyNote={handleDailyNote}
-        />
+        <SidebarPanel />
       )}
 
       {/* Context Menu */}
@@ -364,6 +574,37 @@ function NotebookApp({
 
       {/* Editor */}
       <main id="editor-main" className="editor-area">
+        {/* Header Bar (GNOME HIG) */}
+        <HeaderBar
+          noteTitle={activeNote?.name}
+          onNewBlankNote={handleNewBlankNote}
+          onNewDailyNote={handleDailyNote}
+          onNewMeetingNotes={handleNewMeetingNotes}
+          onOpenTemplates={() => setShowTemplateModal(true)}
+          onNewFolder={() => dispatch({ type: 'ADD_ITEM', parentId: getParentId(), itemType: 'folder' })}
+          onToggleSearch={() => setSearchVisible(v => !v)}
+          onToggleZen={() => dispatch({ type: 'TOGGLE_ZEN_MODE' })}
+          onExportPDF={handleExportPDF}
+          onExportMarkdown={handleExportMarkdown}
+          onExportHTML={handleExportHTML}
+          onExportJSON={handleExportJSON}
+          onExportAllMarkdown={handleExportAllMarkdown}
+          onOpenPreferences={onOpenSettings}
+          onOpenHelp={onOpenHelp}
+          onOpenAbout={() => setShowAbout(true)}
+          onOpenTemplateManager={() => setShowTemplateManager(true)}
+          searchActive={searchVisible}
+        />
+
+        {/* Search Overlay (slides from under header bar) */}
+        <SearchOverlay
+          visible={searchVisible}
+          onClose={() => { setSearchVisible(false); dispatch({ type: 'SET_SEARCH_QUERY', query: '' }) }}
+          query={searchQuery}
+          onQueryChange={handleSearchQueryChange}
+          resultCount={searchResultCount}
+        />
+
         <TabBar />
         {activeNote ? (
           <>
@@ -376,25 +617,11 @@ function NotebookApp({
               ) : saveStatus === 'error' ? (
                 <span className="save-indicator error">Save failed</span>
               ) : null}
-              <div className="toolbar-actions">
-                <button
-                  className="sidebar-action-btn"
-                  title="Export as PDF (Print)"
-                  onClick={handleExportPDF}
-                >
-                  <PDFIcon />
-                </button>
-                <button
-                  className="sidebar-action-btn"
-                  title="Zen Mode (Ctrl+Shift+Z)"
-                  onClick={() => dispatch({ type: 'TOGGLE_ZEN_MODE' })}
-                >
-                  <ZenIcon />
-                </button>
-                {!sidebarVisible && (
+              {!sidebarVisible && (
+                <div className="toolbar-actions">
                   <button
                     className="sidebar-action-btn"
-                    title="Show Sidebar (Ctrl+\\)"
+                    title="Show Sidebar (F9)"
                     onClick={() => dispatch({ type: 'TOGGLE_SIDEBAR' })}
                   >
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
@@ -402,10 +629,11 @@ function NotebookApp({
                       <path d="M5 2v12" />
                     </svg>
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
             <TagInput noteId={activeId} tags={activeNote.tags || []} />
+            <FrontmatterEditor noteId={activeId} frontmatter={activeNote.frontmatter || {}} />
             <div className="editor-meta-row">
               <PanelErrorBoundary panelName="Backlinks">
                 <BacklinksPanel noteId={activeId} noteName={activeNote.name} />
@@ -420,7 +648,8 @@ function NotebookApp({
                   key={activeId}
                   markdown={activeNote.content || ''}
                   onChange={(md) => dispatch({ type: 'UPDATE_NOTE_CONTENT', id: activeId, content: md })}
-                  theme={theme}
+                  theme={effectiveTheme}
+                  spellcheck={spellcheck}
                 />
               </EditorErrorBoundary>
             </div>
@@ -433,6 +662,13 @@ function NotebookApp({
           </div>
         )}
       </main>
+
+      {/* Command Palette */}
+      <CommandPalette
+        visible={commandPaletteVisible}
+        onClose={() => setCommandPaletteVisible(false)}
+        actions={commandActions}
+      />
 
       {/* Dialogs */}
       {dialog && (
@@ -464,6 +700,21 @@ function NotebookApp({
           currentNoteContent={activeNote?.content}
           currentNoteName={activeNote?.name}
         />
+      )}
+
+      {showAbout && (
+        <ConfirmModal
+          title="About MDNotebook"
+          message="MDNotebook v0.2.0 — An offline, encrypted markdown notebook built for technical writing. Your notes never leave your device."
+          confirmLabel="OK"
+          onConfirm={() => setShowAbout(false)}
+          onCancel={() => setShowAbout(false)}
+          showCancel={false}
+        />
+      )}
+
+      {showTemplateManager && (
+        <TemplateManager onClose={() => setShowTemplateManager(false)} />
       )}
     </div>
   )
@@ -661,21 +912,23 @@ export default function Home() {
   return (
     <AppErrorBoundary>
       <NotebookProvider vaultFolder={appPhase.folder} passphrase={appPhase.passphrase}>
-        <NotebookApp
-          vaultName={vaultName}
-          onOpenSettings={() => setShowSettings(true)}
-          onOpenHelp={() => setShowHelp(true)}
-        />
-        {showSettings && (
-          <SettingsPanel
+        <ToastProvider>
+          <NotebookApp
             vaultName={vaultName}
-            onClose={() => setShowSettings(false)}
-            onVaultChanged={handleVaultChanged}
+            onOpenSettings={() => setShowSettings(true)}
+            onOpenHelp={() => setShowHelp(true)}
           />
-        )}
-        {showHelp && (
-          <HelpPanel onClose={() => setShowHelp(false)} />
-        )}
+          {showSettings && (
+            <SettingsPanel
+              vaultName={vaultName}
+              onClose={() => setShowSettings(false)}
+              onVaultChanged={handleVaultChanged}
+            />
+          )}
+          {showHelp && (
+            <HelpPanel onClose={() => setShowHelp(false)} />
+          )}
+        </ToastProvider>
       </NotebookProvider>
     </AppErrorBoundary>
   )

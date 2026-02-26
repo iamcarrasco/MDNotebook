@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { useState, useMemo } from 'react'
 import { CloseIcon } from './Icons'
-import { useNotebook, useNotebookDispatch } from '@/lib/notebook-context'
-import { pickVaultFolder } from '@/lib/local-vault'
-import { exportAllAsMarkdownFolder } from '@/lib/export-import'
+import { useNotebook, useNotebookDispatch, useVaultCredentials } from '@/lib/notebook-context'
+import { pickVaultFolder, readVaultFile, writeVaultFile } from '@/lib/local-vault'
+import { reEncryptVault, getPassphraseStrength } from '@/lib/crypto'
+import { reEncryptAllAssets } from '@/lib/asset-manager'
 
 interface SettingsPanelProps {
   vaultName: string
@@ -15,10 +15,19 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ vaultName, onClose, onVaultChanged }: SettingsPanelProps) {
   const state = useNotebook()
-  const { autosaveDelay, tree } = state
+  const { autosaveDelay } = state
   const dispatch = useNotebookDispatch()
   const [error, setError] = useState<string | null>(null)
-  const [exportMsg, setExportMsg] = useState<string | null>(null)
+  const [showPassChange, setShowPassChange] = useState(false)
+  const [oldPass, setOldPass] = useState('')
+  const [newPass, setNewPass] = useState('')
+  const [confirmPass, setConfirmPass] = useState('')
+  const [passError, setPassError] = useState<string | null>(null)
+  const [passSuccess, setPassSuccess] = useState<string | null>(null)
+  const [passLoading, setPassLoading] = useState(false)
+
+  const { vaultFolder, passphrase: currentPassphrase } = useVaultCredentials()
+  const strength = useMemo(() => getPassphraseStrength(newPass), [newPass])
 
   const handleChangeLocation = async () => {
     setError(null)
@@ -30,17 +39,36 @@ export default function SettingsPanel({ vaultName, onClose, onVaultChanged }: Se
     }
   }
 
-  const handleExportMdFolder = async () => {
-    setExportMsg(null)
+  const handleChangePassphrase = async () => {
+    setPassError(null)
+    setPassSuccess(null)
+    if (oldPass !== currentPassphrase) {
+      setPassError('Current passphrase is incorrect.')
+      return
+    }
+    if (newPass.length < 8) {
+      setPassError('New passphrase must be at least 8 characters.')
+      return
+    }
+    if (newPass !== confirmPass) {
+      setPassError('New passphrases do not match.')
+      return
+    }
+    setPassLoading(true)
     try {
-      const folder = await invoke<string>('pick_vault_folder')
-      if (!folder) return
-      const count = await exportAllAsMarkdownFolder(tree, folder)
-      setExportMsg(`Exported ${count} notes as .md files.`)
+      const raw = await readVaultFile(vaultFolder)
+      if (!raw) throw new Error('Vault file not found')
+      const reEncrypted = await reEncryptVault(raw, oldPass, newPass)
+      await reEncryptAllAssets(vaultFolder, oldPass, newPass)
+      await writeVaultFile(vaultFolder, reEncrypted)
+      setPassSuccess('Passphrase changed successfully. Please restart the app to use the new passphrase.')
+      setOldPass('')
+      setNewPass('')
+      setConfirmPass('')
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('No folder selected')) return
-      setExportMsg(msg || 'Export failed.')
+      setPassError(err instanceof Error ? err.message : 'Failed to change passphrase.')
+    } finally {
+      setPassLoading(false)
     }
   }
 
@@ -88,21 +116,113 @@ export default function SettingsPanel({ vaultName, onClose, onVaultChanged }: Se
         </div>
 
         <div className="settings-section" style={{ borderTop: '1px solid var(--border-color)' }}>
-          <label className="settings-label">Export All Notes</label>
+          <label className="settings-label">Spellcheck</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={state.spellcheck}
+                onChange={(e) => dispatch({ type: 'SET_SPELLCHECK', enabled: e.target.checked })}
+              />
+              Enable spell checking in the editor
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-section" style={{ borderTop: '1px solid var(--border-color)' }}>
+          <label className="settings-label">Markdown Export</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={state.includeFrontmatter}
+                onChange={(e) => dispatch({ type: 'SET_INCLUDE_FRONTMATTER', enabled: e.target.checked })}
+              />
+              Include YAML frontmatter in Markdown exports
+            </label>
+          </div>
           <p className="settings-warning">
-            Export all notes as individual .md files to a folder.
+            Adds title, date, tags, and custom fields as a YAML header block.
           </p>
-          {exportMsg && (
-            <div className="auth-error" style={{
-              marginBottom: 8,
-              ...(exportMsg.startsWith('Exported') ? { color: 'var(--accent)', borderColor: 'var(--accent)', background: 'var(--accent-light)' } : {}),
-            }}>
-              {exportMsg}
+        </div>
+
+        <div className="settings-section" style={{ borderTop: '1px solid var(--border-color)' }}>
+          <label className="settings-label">Appearance</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['light', 'dark', 'system'] as const).map((t) => (
+              <button
+                key={t}
+                className={state.theme === t ? 'auth-btn' : 'confirm-modal-cancel'}
+                style={{ flex: 1, textTransform: 'capitalize' }}
+                onClick={() => dispatch({ type: 'SET_THEME', theme: t })}
+              >
+                {t === 'system' ? 'Follow System' : t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-section" style={{ borderTop: '1px solid var(--border-color)' }}>
+          <label className="settings-label">Change Passphrase</label>
+          {!showPassChange ? (
+            <button className="auth-btn" onClick={() => setShowPassChange(true)}>
+              Change Passphrase
+            </button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {passError && <div className="auth-error" style={{ marginBottom: 4 }}>{passError}</div>}
+              {passSuccess && (
+                <div className="auth-error" style={{ marginBottom: 4, color: 'var(--accent)', borderColor: 'var(--accent)', background: 'var(--accent-light)' }}>
+                  {passSuccess}
+                </div>
+              )}
+              <input
+                className="auth-input"
+                type="password"
+                placeholder="Current passphrase"
+                value={oldPass}
+                onChange={(e) => setOldPass(e.target.value)}
+                disabled={passLoading}
+              />
+              <input
+                className="auth-input"
+                type="password"
+                placeholder="New passphrase (min 8 characters)"
+                value={newPass}
+                onChange={(e) => setNewPass(e.target.value)}
+                disabled={passLoading}
+              />
+              {newPass.length > 0 && (
+                <div className="passphrase-strength">
+                  <div className="passphrase-strength-track">
+                    <div
+                      className="passphrase-strength-fill"
+                      style={{ width: `${(strength.level / 3) * 100}%`, backgroundColor: strength.color }}
+                    />
+                  </div>
+                  <span className="passphrase-strength-label" style={{ color: strength.color }}>
+                    {strength.label}
+                  </span>
+                </div>
+              )}
+              <input
+                className="auth-input"
+                type="password"
+                placeholder="Confirm new passphrase"
+                value={confirmPass}
+                onChange={(e) => setConfirmPass(e.target.value)}
+                disabled={passLoading}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="confirm-modal-cancel" onClick={() => { setShowPassChange(false); setPassError(null); setPassSuccess(null) }} disabled={passLoading}>
+                  Cancel
+                </button>
+                <button className="auth-btn" onClick={handleChangePassphrase} disabled={passLoading}>
+                  {passLoading ? 'Changing...' : 'Change Passphrase'}
+                </button>
+              </div>
             </div>
           )}
-          <button className="auth-btn" onClick={handleExportMdFolder}>
-            Export as .md Files
-          </button>
         </div>
       </div>
     </div>

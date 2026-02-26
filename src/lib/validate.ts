@@ -42,6 +42,14 @@ function isValidTreeItem(item: unknown, depth: number = 0): item is TreeItem {
     }
   }
 
+  // Frontmatter — must be Record<string, string>
+  if (obj.frontmatter !== undefined) {
+    if (!obj.frontmatter || typeof obj.frontmatter !== 'object' || Array.isArray(obj.frontmatter)) return false
+    for (const v of Object.values(obj.frontmatter as Record<string, unknown>)) {
+      if (typeof v !== 'string') return false
+    }
+  }
+
   return true
 }
 

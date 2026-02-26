@@ -3,6 +3,7 @@ export interface NoteTemplate {
   description: string
   content: string
   tags?: string[]
+  category?: string
 }
 
 export const noteTemplates: NoteTemplate[] = [
@@ -10,6 +11,7 @@ export const noteTemplates: NoteTemplate[] = [
     name: 'Blank Note',
     description: 'Start from scratch',
     content: '',
+    category: 'Quick',
   },
   {
     name: 'Meeting Notes',
@@ -35,6 +37,7 @@ export const noteTemplates: NoteTemplate[] = [
 
 `,
     tags: ['meeting'],
+    category: 'Quick',
   },
   {
     name: 'TODO List',
@@ -59,6 +62,7 @@ export const noteTemplates: NoteTemplate[] = [
 
 `,
     tags: ['todo'],
+    category: 'Planning',
   },
   {
     name: 'Journal Entry',
@@ -85,6 +89,7 @@ export const noteTemplates: NoteTemplate[] = [
 
 `,
     tags: ['journal'],
+    category: 'Reflection',
   },
   {
     name: 'Project Plan',
@@ -120,5 +125,26 @@ Brief description of the project.
 
 `,
     tags: ['project'],
+    category: 'Planning',
+  },
+  {
+    name: 'Daily Note',
+    description: 'Daily journaling with tasks',
+    content: `# Daily Note - ${new Date().toISOString().slice(0, 10)}
+
+## Tasks
+
+- [ ]
+
+## Notes
+
+
+
+## End of Day Review
+
+
+`,
+    tags: ['daily'],
+    category: 'Quick',
   },
 ]
